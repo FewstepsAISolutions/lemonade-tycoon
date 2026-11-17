@@ -24,6 +24,8 @@ Weather, price, quality and reputation drive demand. Customer satisfaction feeds
 
 Alex and Sam start the campaign on your team. Before each trading day, you can hire additional staff or fire someone already on the team. Team changes take effect immediately and stay in place until you change them again. You need to keep at least one staff member, and your team can have up to ten.
 
+You can also cancel an individual staff member's shift for the current day and restore it before trading. A cancelled shift does not count toward capacity or wages, and shifts reset for the next day. At least one staff member must remain scheduled to work.
+
 | Staff | Trait | Base capacity | Daily wage |
 |---|---|---|---|
 | Alex | Organised | 50 cups | £10 |
