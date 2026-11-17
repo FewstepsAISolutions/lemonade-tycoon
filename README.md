@@ -8,7 +8,7 @@ A 30-day lemonade stand business simulation, written in pure Python 3 with no ex
 python3 lemonade_tycoon.py
 ```
 
-Then open http://localhost:8000. Press Ctrl+C to stop.
+Then open the `http://localhost:...` address printed in the terminal. It uses port 8000 when available and tries the next ports if needed. Press Ctrl+C to stop.
 
 ## How it plays
 
@@ -22,21 +22,21 @@ Weather, price, quality and reputation drive demand. Customer satisfaction feeds
 
 ## Staff and teamwork
 
-The same two staff members work throughout the campaign:
+Alex and Sam start the campaign on your team. Before each trading day, you can hire additional staff or fire someone already on the team. Team changes take effect immediately and stay in place until you change them again. You need to keep at least one staff member, and your team can have up to ten.
 
 | Staff | Trait | Base capacity | Daily wage |
 |---|---|---|---|
 | Alex | Organised | 50 cups | £10 |
 | Sam | Friendly | 50 cups | £10 |
 
-Organised + Friendly gives a fixed ×1.1 teamwork multiplier. Combined capacity is therefore floor((50 + 50) × 1.1) = **110 cups per day**. Matching traits and unspecified pairs use ×1.0. Pair ordering does not affect the result. These are game balancing rules, not claims about real personality types.
+Each staff member adds 50 cups of daily capacity and costs £10 in wages for each day worked. Hiring someone costs no fee; their wages are included in the day's upfront affordability check and profit. An Organised and Friendly team gets a ×1.1 teamwork multiplier, applied once even when the team has more than two people. Other teams use ×1.0. These are game balancing rules, not claims about real personality types.
 
 Daily sales are the lowest of demand, prepared cups and staff capacity. The £20 daily wages are included in upfront affordability checks and profit, replacing the former Normal / Extra care service selection. Extra care's satisfaction bonus has been removed.
 
-Your team and its capacity calculation appear on screen. Daily results record wages, base capacity, teamwork multiplier and final capacity. There is no hiring, firing or relationship progression in this version.
+Your team and its capacity calculation appear on screen. Daily results record the staff working, wages, base capacity, teamwork multiplier and final capacity. Staff details are saved with the game.
 
 ## Save and resume
 
-You can save, resume or reset the game, and saves go to `lemonade_save.json`. Staff details are saved with the game. Older saves without staff automatically receive the default pair when loaded; their existing history remains intact.
+You can save, resume or reset the game, and saves go to `lemonade_save.json`. Older saves without staff automatically receive the default pair when loaded; their existing history remains intact.
 
 The simulation is rules-based, with no AI.

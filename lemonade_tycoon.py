@@ -1,5 +1,5 @@
 """Lemonade Tycoon — run with Python 3, no external packages."""
-import random, json, math
+import random, json, math, errno
 from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs
@@ -9,19 +9,16 @@ SAVE=Path(__file__).with_name('lemonade_save.json')
 WEATHER={'Heatwave':1.8,'Sunny':1.4,'Warm':1.2,'Cloudy':1,'Windy':.8,'Light rain':.6,'Heavy rain':.3}
 LOC={'Park':(250,10),'High street':(400,20),'Station':(600,35),'Residential':(100,0)}
 DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
+TRAITS=['Organised','Friendly','Steady']
+MAX_STAFF=10
 DEFAULT_STAFF=[
     dict(name='Alex',trait='Organised',capacity=50,daily_wage=10),
     dict(name='Sam',trait='Friendly',capacity=50,daily_wage=10),
 ]
-# Unordered trait pairs: the same pairing always produces the same effect.
-TRAIT_PAIRS={
-    tuple(sorted(('Organised','Friendly'))):1.1,
-    tuple(sorted(('Organised','Organised'))):1.0,
-    tuple(sorted(('Friendly','Friendly'))):1.0,
-}
 def team_stats(staff):
     base=sum(person['capacity'] for person in staff)
-    multiplier=TRAIT_PAIRS.get(tuple(sorted(person['trait'] for person in staff)),1.0)
+    traits={person['trait'] for person in staff}
+    multiplier=1.1 if 'Organised' in traits and 'Friendly' in traits else 1.0
     return base,multiplier,math.floor(base*multiplier),round(sum(person['daily_wage'] for person in staff),2)
 def load_game():
     saved=json.loads(SAVE.read_text())
@@ -42,18 +39,22 @@ def simulate(s,location,price,stock,quality):
     sold=min(stock,demand,capacity); revenue=round(sold*price,2); profit=round(revenue-cost,2)
     satisfaction=min(100,max(0,75+(10 if quality=='Premium' else 0)-25*(demand-sold)/max(1,demand)))
     s['cash']=round(s['cash']+profit,2); s['reputation']=round((s['reputation']+satisfaction)/2,1)
-    s['history'].append(dict(day=s['day'],weather=s['weather'],location=location,footfall=footfall,demand=demand,sold=sold,waste=stock-sold,revenue=revenue,cost=cost,profit=profit,wages=wages,base_capacity=base_capacity,teamwork_multiplier=teamwork,capacity=capacity,satisfaction=round(satisfaction)))
+    s['history'].append(dict(day=s['day'],weather=s['weather'],location=location,footfall=footfall,demand=demand,sold=sold,waste=stock-sold,revenue=revenue,cost=cost,profit=profit,wages=wages,staff=', '.join(person['name'] for person in s['staff']),base_capacity=base_capacity,teamwork_multiplier=teamwork,capacity=capacity,satisfaction=round(satisfaction)))
     s['day']+=1; s['weather']=random.choices(list(WEATHER),[5,25,20,20,10,15,5])[0]
     return s
 
 def page(error=''):
     s=state; last=s['history'][-1] if s['history'] else None
     base_capacity,teamwork,capacity,wages=team_stats(s['staff'])
-    team='<section><h2>Your team</h2>'+''.join(f"<p>{escape(person['name'])} · {escape(person['trait'])} · {person['capacity']} cups/day · £{person['daily_wage']:.2f}/day</p>" for person in s['staff'])+f'<p>Teamwork: {base_capacity} × {teamwork:g} = <b>{capacity} cups/day</b> ({(teamwork-1)*100:+.0f}%). Daily wages: £{wages:.2f}.</p></section>'
+    staff_rows=''.join(f"<li><b>{escape(person['name'])}</b> · {escape(person['trait'])} · {person['capacity']} cups/day · £{person['daily_wage']:.2f}/day"+(f" <form class=inline method=post><input type=hidden name=staff_index value={i}><button name=action value=fire>Fire</button></form>" if s['day']<=30 and len(s['staff'])>1 else '')+'</li>' for i,person in enumerate(s['staff']))
+    team='<section><h2>Today’s team</h2><p>Choose who works before each trading day. Changes take effect immediately and remain until you change the team again.</p><ul>'+staff_rows+'</ul>'+f'<p>Teamwork: {base_capacity} × {teamwork:g} = <b>{capacity} cups/day</b> ({(teamwork-1)*100:+.0f}%). Today’s wages: £{wages:.2f}.</p>'
+    if s['day']<=30 and len(s['staff'])<MAX_STAFF:
+        team+=f'''<form method="post"><h3>Add a staff member</h3><label>Name<input name="name" maxlength="24" required></label><label>Trait<select name="trait">{''.join(f'<option>{escape(trait)}</option>' for trait in TRAITS)}</select></label><p>Each new staff member brings 50 cups/day of capacity and costs £10/day.</p><button name="action" value="hire">Hire for today</button></form>'''
+    team+='</section>'
     options=lambda vals: ''.join(f'<option>{escape(v)}</option>' for v in vals)
-    result='' if not last else '<h2>Last trading day</h2><div class="grid">'+''.join(f'<div>{k.title()}<strong>{"£"+format(v,".2f") if k in ("revenue","cost","profit","wages") else escape(str(v))}</strong></div>' for k,v in last.items())+'</div>'
+    result='' if not last else '<h2>Last trading day</h2><div class="grid">'+''.join(f'<div>{k.replace("_"," ").title()}<strong>{"£"+format(v,".2f") if k in ("revenue","cost","profit","wages") else escape(str(v))}</strong></div>' for k,v in last.items())+'</div>'
     form=f'''<form method="post"><label>Location<select name="location">{options(LOC)}</select></label><label>Price per cup (£)<input name="price" type="number" min=".5" max="20" step=".1" value="4" required></label><label>Cups prepared<input name="stock" type="number" min="0" max="1000" value="30" required></label><label>Drink quality<select name="quality">{options(['Standard','Premium'])}</select></label><p>Standard: £0.40/cup · Premium: £0.75/cup · Staff wages: £{wages:.2f}/day</p><button name="action" value="trade">Start trading day</button></form>''' if s['day']<=30 else '<h2>Campaign complete</h2>'
-    return f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lemonade Tycoon</title><style>body{{font:16px system-ui;background:#f6f4df;color:#253e2c;max-width:680px;margin:auto;padding:20px}}section,form{{background:white;padding:18px;border-radius:14px;margin:14px 0}}label{{display:block;margin:12px 0}}input,select,button{{font:inherit;padding:10px;border-radius:8px;border:1px solid #b4c3a4}}input,select{{display:block;width:100%;box-sizing:border-box;margin-top:5px}}button{{background:#f5d34c;cursor:pointer;font-weight:bold;margin:4px}}.grid{{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}}.grid div{{background:white;padding:12px;border-radius:10px}}strong{{display:block;font-size:23px}}.error{{color:#a22}}</style><h1>🍋 Lemonade Tycoon</h1><p>Day {min(s['day'],30)} / 30 · {DAYS[(min(s['day'],30)-1)%7]} · {s['weather']}</p><div class="grid"><div>Cash<strong>£{s['cash']:.2f}</strong></div><div>Reputation<strong>{s['reputation']}%</strong></div></div><p class="error">{escape(error)}</p>{team}{form}{result}<form method="post"><button name="action" value="save">Save game</button><button name="action" value="load">Resume saved game</button><button name="action" value="reset">New game</button></form><small>Python rules-based simulation · No AI</small></html>'''
+    return f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lemonade Tycoon</title><style>body{{font:16px system-ui;background:#f6f4df;color:#253e2c;max-width:680px;margin:auto;padding:20px}}section,form{{background:white;padding:18px;border-radius:14px;margin:14px 0}}label{{display:block;margin:12px 0}}input,select,button{{font:inherit;padding:10px;border-radius:8px;border:1px solid #b4c3a4}}input,select{{display:block;width:100%;box-sizing:border-box;margin-top:5px}}button{{background:#f5d34c;cursor:pointer;font-weight:bold;margin:4px}}.inline{{display:inline;padding:0;margin:0;background:transparent}}.inline button{{padding:5px 9px}}ul{{padding-left:22px}}li{{margin:9px 0}}.grid{{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}}.grid div{{background:white;padding:12px;border-radius:10px}}strong{{display:block;font-size:23px}}.error{{color:#a22}}</style><h1>🍋 Lemonade Tycoon</h1><p>Day {min(s['day'],30)} / 30 · {DAYS[(min(s['day'],30)-1)%7]} · {s['weather']}</p><div class="grid"><div>Cash<strong>£{s['cash']:.2f}</strong></div><div>Reputation<strong>{s['reputation']}%</strong></div></div><p class="error">{escape(error)}</p>{team}{form}{result}<form method="post"><button name="action" value="save">Save game</button><button name="action" value="load">Resume saved game</button><button name="action" value="reset">New game</button></form><small>Python rules-based simulation · No AI</small></html>'''
 class Handler(BaseHTTPRequestHandler):
     def reply(self,error=''):
         body=page(error).encode(); self.send_response(200); self.send_header('Content-Type','text/html; charset=utf-8'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
@@ -62,7 +63,17 @@ class Handler(BaseHTTPRequestHandler):
         global state
         try:
             p=parse_qs(self.rfile.read(int(self.headers['Content-Length'])).decode()); get=lambda k:p[k][0]; action=get('action')
-            if action=='trade' and state['day']<=30:
+            if action=='hire' and state['day']<=30:
+                name=get('name').strip(); trait=get('trait')
+                if not name or len(name)>24 or trait not in TRAITS: raise ValueError('Enter a name and choose a valid staff trait.')
+                if len(state['staff'])>=MAX_STAFF: raise ValueError(f'You can have up to {MAX_STAFF} staff members.')
+                state['staff'].append(dict(name=name,trait=trait,capacity=50,daily_wage=10))
+            elif action=='fire' and state['day']<=30:
+                index=int(get('staff_index'))
+                if len(state['staff'])<=1: raise ValueError('Keep at least one staff member on the team.')
+                if not 0<=index<len(state['staff']): raise ValueError('That staff member is no longer on the team.')
+                state['staff'].pop(index)
+            elif action=='trade' and state['day']<=30:
                 price=float(get('price')); stock=int(get('stock')); loc=get('location'); q=get('quality')
                 if not .5<=price<=20 or not 0<=stock<=1000 or loc not in LOC or q not in ['Standard','Premium']: raise ValueError('Invalid trading plan.')
                 simulate(state,loc,price,stock,q)
@@ -72,5 +83,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(303); self.send_header('Location','/'); self.end_headers()
         except (ValueError,KeyError,OSError) as e: self.reply(str(e))
 if __name__=='__main__':
-    print('Open http://localhost:8000 in your browser. Ctrl+C to stop.')
-    HTTPServer(('127.0.0.1',8000),Handler).serve_forever()
+    for port in range(8000,8011):
+        try:
+            server=HTTPServer(('127.0.0.1',port),Handler)
+            break
+        except OSError as exc:
+            if exc.errno != errno.EADDRINUSE:
+                raise
+    else:
+        raise RuntimeError('No available local port between 8000 and 8010.')
+    print(f'Open http://localhost:{port} in your browser. Ctrl+C to stop.')
+    server.serve_forever()
