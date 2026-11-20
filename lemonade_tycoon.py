@@ -1,13 +1,18 @@
 """Lemonade Tycoon — run with Python 3, no external packages."""
 import random, json, math, errno
+import mimetypes
+import threading
 from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote, urlsplit
 from pathlib import Path
 from html import escape
 SAVE=Path(__file__).with_name('lemonade_save.json')
+IMAGE_DIR=Path(__file__).with_name('lemonade-tycoon-images')
 WEATHER={'Heatwave':1.8,'Sunny':1.4,'Warm':1.2,'Cloudy':1,'Windy':.8,'Light rain':.6,'Heavy rain':.3}
 LOC={'Park':(250,10),'High street':(400,20),'Station':(600,35),'Residential':(100,0)}
+LOCATION_IMAGES={'Park':'park-stand.png','High street':'high-street-stand.png','Station':'station-shop.png','Residential':'residential-stand.png'}
+EXTRA_STAFF_IMAGES=['asian-employee.png','indian-employee.png']
 DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
 TRAITS=['Organised','Friendly','Steady']
 MAX_STAFF=10
@@ -32,6 +37,10 @@ def fresh(): return dict(day=1,cash=100,weather='Sunny',reputation=75,history=[]
 def working_staff(s):
     off_today=set(s.get('off_today',[]))
     return [person for person in s['staff'] if person['id'] not in off_today]
+def staff_image(person):
+    if person['id']==1: return 'alex.png'
+    if person['id']==2: return 'sam.png'
+    return EXTRA_STAFF_IMAGES[(person['id']-3)%len(EXTRA_STAFF_IMAGES)]
 state=fresh()
 def simulate(s,location,price,stock,quality):
     staff=working_staff(s)
@@ -53,6 +62,8 @@ def simulate(s,location,price,stock,quality):
 
 def page(error=''):
     s=state; last=s['history'][-1] if s['history'] else None
+    selected_location=s.get('selected_location','Park')
+    if selected_location not in LOCATION_IMAGES: selected_location='Park'
     working=working_staff(s)
     base_capacity,teamwork,capacity,wages=team_stats(working)
     off_today=set(s.get('off_today',[]))
@@ -61,14 +72,24 @@ def page(error=''):
     if s['day']<=30 and len(s['staff'])<MAX_STAFF:
         team+=f'''<form method="post"><h3>Add a staff member</h3><label>Name<input name="name" maxlength="24" required></label><label>Trait<select name="trait">{''.join(f'<option>{escape(trait)}</option>' for trait in TRAITS)}</select></label><p>Each new staff member brings 50 cups/day of capacity and costs £10/day.</p><button name="action" value="hire">Hire for today</button></form>'''
     team+='</section>'
-    options=lambda vals: ''.join(f'<option>{escape(v)}</option>' for v in vals)
+    options=lambda vals,selected=None: ''.join(f'<option value="{escape(v)}"{" selected" if v==selected else ""}>{escape(v)}</option>' for v in vals)
+    scene_staff=''.join(f'<img class="staff-sprite" src="/images/people/{staff_image(person)}" alt="{escape(person["name"])}" style="left:{(i+1)/(len(working)+1)*100:.1f}%">' for i,person in enumerate(working))
+    scene=f'<div class="scene"><img class="location-art" src="/images/{LOCATION_IMAGES[selected_location]}" alt="{escape(selected_location)} lemonade stand">{scene_staff}</div>'
     result='' if not last else '<h2>Last trading day</h2><div class="grid">'+''.join(f'<div>{k.replace("_"," ").title()}<strong>{"£"+format(v,".2f") if k in ("revenue","cost","profit","wages") else escape(str(v))}</strong></div>' for k,v in last.items())+'</div>'
-    form=f'''<form method="post"><label>Location<select name="location">{options(LOC)}</select></label><label>Price per cup (£)<input name="price" type="number" min=".5" max="20" step=".1" value="4" required></label><label>Cups prepared<input name="stock" type="number" min="0" max="1000" value="30" required></label><label>Drink quality<select name="quality">{options(['Standard','Premium'])}</select></label><p>Standard: £0.40/cup · Premium: £0.75/cup · Staff wages: £{wages:.2f}/day</p><button name="action" value="trade">Start trading day</button></form>''' if s['day']<=30 else '<h2>Campaign complete</h2>'
-    return f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lemonade Tycoon</title><style>body{{font:16px system-ui;background:#f6f4df;color:#253e2c;max-width:680px;margin:auto;padding:20px}}section,form{{background:white;padding:18px;border-radius:14px;margin:14px 0}}label{{display:block;margin:12px 0}}input,select,button{{font:inherit;padding:10px;border-radius:8px;border:1px solid #b4c3a4}}input,select{{display:block;width:100%;box-sizing:border-box;margin-top:5px}}button{{background:#f5d34c;cursor:pointer;font-weight:bold;margin:4px}}.inline{{display:inline;padding:0;margin:0;background:transparent}}.inline button{{padding:5px 9px}}ul{{padding-left:22px}}li{{margin:9px 0}}.grid{{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}}.grid div{{background:white;padding:12px;border-radius:10px}}strong{{display:block;font-size:23px}}.error{{color:#a22}}</style><h1>🍋 Lemonade Tycoon</h1><p>Day {min(s['day'],30)} / 30 · {DAYS[(min(s['day'],30)-1)%7]} · {s['weather']}</p><div class="grid"><div>Cash<strong>£{s['cash']:.2f}</strong></div><div>Reputation<strong>{s['reputation']}%</strong></div></div><p class="error">{escape(error)}</p>{team}{form}{result}<form method="post"><button name="action" value="save">Save game</button><button name="action" value="load">Resume saved game</button><button name="action" value="reset">New game</button></form><small>Python rules-based simulation · No AI</small></html>'''
+    form=f'''<form method="post"><label>Location<select name="location">{options(LOC,selected_location)}</select></label><label>Price per cup (£)<input name="price" type="number" min=".5" max="20" step=".1" value="4" required></label><label>Cups prepared<input name="stock" type="number" min="0" max="1000" value="30" required></label><label>Drink quality<select name="quality">{options(['Standard','Premium'])}</select></label><p>Standard: £0.40/cup · Premium: £0.75/cup · Staff wages: £{wages:.2f}/day</p><button name="action" value="trade">Start trading day</button></form>''' if s['day']<=30 else '<h2>Campaign complete</h2>'
+    return f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lemonade Tycoon</title><style>body{{font:16px system-ui;background:#f6f4df;color:#253e2c;max-width:680px;margin:auto;padding:20px}}.scene{{position:relative;width:100%;aspect-ratio:3/2;overflow:hidden;border-radius:14px;background:#d9e8d5;margin:14px 0 20px}}.location-art{{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}}.staff-sprite{{position:absolute;bottom:4%;width:100px;height:196px;object-fit:contain;image-rendering:pixelated;transform:translateX(-50%);filter:drop-shadow(1px 2px 2px #3338}}section,form{{background:white;padding:18px;border-radius:14px;margin:14px 0}}label{{display:block;margin:12px 0}}input,select,button{{font:inherit;padding:10px;border-radius:8px;border:1px solid #b4c3a4}}input,select{{display:block;width:100%;box-sizing:border-box;margin-top:5px}}button{{background:#f5d34c;cursor:pointer;font-weight:bold;margin:4px}}.quit{{background:#e7a59a}}.inline{{display:inline;padding:0;margin:0;background:transparent}}.inline button{{padding:5px 9px}}ul{{padding-left:22px}}li{{margin:9px 0}}.grid{{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}}.grid div{{background:white;padding:12px;border-radius:10px}}strong{{display:block;font-size:23px}}.error{{color:#a22}}</style><h1>🍋 Lemonade Tycoon</h1>{scene}<p>Day {min(s['day'],30)} / 30 · {DAYS[(min(s['day'],30)-1)%7]} · {s['weather']}</p><div class="grid"><div>Cash<strong>£{s['cash']:.2f}</strong></div><div>Reputation<strong>{s['reputation']}%</strong></div></div><p class="error">{escape(error)}</p>{team}{form}{result}<form method="post"><button name="action" value="save">Save game</button><button name="action" value="load">Resume saved game</button><button name="action" value="reset">New Game</button><button class="quit" name="action" value="quit">Quit</button></form><small>Python rules-based simulation · No AI</small><script>const locationImages={json.dumps(LOCATION_IMAGES)};document.querySelector('[name=location]')?.addEventListener('change',event=>document.querySelector('.location-art').src='/images/'+locationImages[event.target.value]);</script></html>'''
 class Handler(BaseHTTPRequestHandler):
     def reply(self,error=''):
         body=page(error).encode(); self.send_response(200); self.send_header('Content-Type','text/html; charset=utf-8'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
-    def do_GET(self): self.reply()
+    def do_GET(self):
+        path=urlsplit(self.path).path
+        if not path.startswith('/images/'): return self.reply()
+        asset=(IMAGE_DIR/unquote(path.removeprefix('/images/'))).resolve()
+        if not asset.is_relative_to(IMAGE_DIR.resolve()) or not asset.is_file():
+            self.send_error(404); return
+        content=asset.read_bytes()
+        content_type='image/webp' if content[:4]==b'RIFF' and content[8:12]==b'WEBP' else mimetypes.guess_type(asset.name)[0] or 'application/octet-stream'
+        self.send_response(200); self.send_header('Content-Type',content_type); self.send_header('Content-Length',str(len(content))); self.end_headers(); self.wfile.write(content)
     def do_POST(self):
         global state
         try:
@@ -96,10 +117,15 @@ class Handler(BaseHTTPRequestHandler):
             elif action=='trade' and state['day']<=30:
                 price=float(get('price')); stock=int(get('stock')); loc=get('location'); q=get('quality')
                 if not .5<=price<=20 or not 0<=stock<=1000 or loc not in LOC or q not in ['Standard','Premium']: raise ValueError('Invalid trading plan.')
+                state['selected_location']=loc
                 simulate(state,loc,price,stock,q)
             elif action=='save': SAVE.write_text(json.dumps(state)); return self.reply('Game saved.')
             elif action=='load': state=load_game()
             elif action=='reset': state=fresh()
+            elif action=='quit':
+                self.reply('Game stopped. You can close this tab.')
+                threading.Thread(target=server.shutdown,daemon=True).start()
+                return
             self.send_response(303); self.send_header('Location','/'); self.end_headers()
         except (ValueError,KeyError,OSError) as e: self.reply(str(e))
 if __name__=='__main__':

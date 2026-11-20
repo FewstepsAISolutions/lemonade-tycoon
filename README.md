@@ -8,7 +8,7 @@ A 30-day lemonade stand business simulation, written in pure Python 3 with no ex
 python3 lemonade_tycoon.py
 ```
 
-Then open the `http://localhost:...` address printed in the terminal. It uses port 8000 when available and tries the next ports if needed. Press Ctrl+C to stop.
+Then open the `http://localhost:...` address printed in the terminal. It uses port 8000 when available and tries the next ports if needed. Use the **Quit** button at the bottom of the game, or press Ctrl+C in the terminal, to stop the server.
 
 ## How it plays
 
@@ -19,6 +19,8 @@ Each trading day you choose:
 - **Drink quality**: Standard (£0.40 a cup) or Premium (£0.75 a cup).
 
 Weather, price, quality and reputation drive demand. Customer satisfaction feeds your reputation for the next day.
+
+The selected location scene appears below the title and updates when you change the location. Staff scheduled to work are shown over the scene; Alex and Sam use their matching portraits, and additional staff use the available employee sprites.
 
 ## Staff and teamwork
 
